@@ -253,7 +253,7 @@ function getParams(){
 
 // ===== 3D viewer (Three.js) =====
 const canvas=document.getElementById('viewer');
-const renderer=new THREE.WebGLRenderer({canvas, antialias:true, alpha:true, preserveDrawingBuffer:true});
+const renderer=new THREE.WebGLRenderer({canvas, antialias:true, alpha:true, preserveDrawingBuffer:false});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -270,6 +270,7 @@ const keyLight=new THREE.DirectionalLight(0xffffff, 1.0);
 keyLight.castShadow=true;
 keyLight.shadow.mapSize.set(1024,1024);
 scene.add(keyLight);
+scene.add(keyLight.target);
 const fillLight=new THREE.DirectionalLight(0xffffff, 0.35);
 scene.add(fillLight);
 
@@ -368,7 +369,6 @@ function rebuildPreview(){
   // lights scaled to object size
   keyLight.position.set(radius*1.8, radius*3.0, radius*2.2);
   keyLight.target.position.set(0,0,0);
-  scene.add(keyLight.target);
   keyLight.shadow.camera.left=-radius*2; keyLight.shadow.camera.right=radius*2;
   keyLight.shadow.camera.top=radius*2; keyLight.shadow.camera.bottom=-radius*2;
   keyLight.shadow.camera.near=0.1; keyLight.shadow.camera.far=radius*8;
