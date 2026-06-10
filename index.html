@@ -109,7 +109,7 @@
     <div class="statusbar" style="margin-top:10px">
       <div class="status-left">
         <span class="status-dot" id="status-dot"></span>
-        <span id="status">待機中 / Idle</span>
+        <span id="status" aria-live="polite">待機中 / Idle</span>
       </div>
       <small>三角は最下三角面、六角は最下頂点の周囲ポリゴン（多くは六角・一部五角）がz=0に面接地。</small>
     </div>
@@ -187,11 +187,11 @@ function computeEps(T){ return Math.max(0.002, Math.min(0.02, T*0.003)); }
 
 function buildOriented(D,T,L,pattern){
   const R=D/2;
-  const ico=icosahedron(); const sub=(L>0)?subdivide(ico,L):ico; const baseV=projectToSphere(sub.V, R);
+  const ico=icosahedron(); const subd=(L>0)?subdivide(ico,L):ico; const baseV=projectToSphere(subd.V, R);
   let nodes=[], edges=[];
-  if(pattern==='tri'){ nodes=baseV; edges=uniqueEdges(sub.F); }
-  else { nodes=faceCentersOnSphere(baseV, sub.F, R); edges=dualEdges(sub.F); }
-  const baseGeom={V:baseV, F:sub.F};
+  if(pattern==='tri'){ nodes=baseV; edges=uniqueEdges(subd.F); }
+  else { nodes=faceCentersOnSphere(baseV, subd.F, R); edges=dualEdges(subd.F); }
+  const baseGeom={V:baseV, F:subd.F};
   const oriented=(pattern==='tri')?orientTriangle(nodes, baseGeom):orientHex(nodes, baseGeom);
   return {oriented, edges};
 }
@@ -220,12 +220,36 @@ function stlBin(verts,tris,name){const triCount=tris.length, header=new ArrayBuf
  new Uint8Array(header).set(title); const body=new ArrayBuffer(4+triCount*50), dv=new DataView(body); dv.setUint32(0,triCount,true); let offset=4;
   for(const [ia,ib,ic] of tris){const n=triNormal(ia,ib,ic,verts), A=verts[ia],B=verts[ib],C=verts[ic]; const data=[n[0],n[1],n[2],A[0],A[1],A[2],B[0],B[1],B[2],C[0],C[1],C[2]]; for(let i=0;i<12;i++) dv.setFloat32(offset+i*4, data[i], true); dv.setUint16(offset+48, 0, true); offset+=50}
   const out=new Uint8Array(80+body.byteLength); out.set(new Uint8Array(header),0); out.set(new Uint8Array(body),80); return out.buffer }
-const b64=buf=>{const CH=0x8000, bytes=new Uint8Array(buf); let bin=''; for(let i=0;i<bytes.length;i+=CH){bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH))} return btoa(bin)};
 const statusSpan=document.getElementById('status'); const statusDot=document.getElementById('status-dot');
 function setStatus(t,c){ statusSpan.textContent=t; statusDot.style.background=c; statusDot.style.borderColor=c }
 function fmt(x){const s=Number(x); return (Math.abs(s-Math.round(s))<1e-6)?String(Math.round(s)):String(Number(s.toFixed(1)))}
 function getPattern(){ return document.querySelector('input[name="pattern"]:checked').value }
 function getBeamShape(){ return document.querySelector('input[name="beamshape"]:checked').value }
+
+// ===== input validation =====
+function getParams(){
+  const diameter=Number(document.getElementById('diameter').value);
+  const thickness=Number(document.getElementById('thickness').value);
+  const level=Number(document.getElementById('detail10').value);
+
+  if(!Number.isFinite(diameter) || diameter < 5){
+    throw new Error('直径は5以上の数値を入力してください / Diameter must be 5 or greater.');
+  }
+  if(!Number.isFinite(thickness) || thickness < 0.2){
+    throw new Error('枠の太さは0.2以上の数値を入力してください / Thickness must be 0.2 or greater.');
+  }
+  if(!Number.isInteger(level) || level < 0 || level > 5){
+    throw new Error('形状分割レベルは0〜5の整数を入力してください / Mesh Division Level must be an integer from 0 to 5.');
+  }
+
+  return {
+    D: diameter,
+    T: thickness,
+    L: level,
+    pattern: getPattern(),
+    shape: getBeamShape()
+  };
+}
 
 // ===== 3D viewer (Three.js) =====
 const canvas=document.getElementById('viewer');
@@ -307,11 +331,8 @@ function frame(){
 
 // ===== build preview geometry =====
 function rebuildPreview(){
-  const D=parseFloat(document.getElementById('diameter').value||'50'), R=D/2;
-  const T=parseFloat(document.getElementById('thickness').value||'1.6');
-  const L=parseInt(document.getElementById('detail10').value||'2',10);
-  const pattern=getPattern();
-  const shape=getBeamShape();
+  const {D,T,L,pattern,shape}=getParams();
+  const R=D/2;
 
   const {oriented, edges}=buildOriented(D,T,L,pattern);
   const {verts, tris}=buildMeshTris(oriented, edges, T, shape);
@@ -366,29 +387,44 @@ function fit(){
 
 // ===== Export =====
 document.getElementById('export').addEventListener('click',()=>{
-  setStatus('生成中 / Generating...','#f59e0b');
-  const D=parseFloat(document.getElementById('diameter').value||'50');
-  const T=parseFloat(document.getElementById('thickness').value||'1.6');
-  const L=parseInt(document.getElementById('detail10').value||'2',10);
-  const pattern=getPattern();
-  const shape=getBeamShape();
+  try{
+    setStatus('生成中 / Generating...','#f59e0b');
+    const {D,T,L,pattern,shape}=getParams();
 
-  const {oriented, edges}=buildOriented(D,T,L,pattern);
-  const {verts, tris}=buildMeshTris(oriented, edges, T, shape);
+    const {oriented, edges}=buildOriented(D,T,L,pattern);
+    const {verts, tris}=buildMeshTris(oriented, edges, T, shape);
 
-  const name=`geo-ball_D${fmt(D)}_F${fmt(T)}_L${fmt(L)}_${pattern}_${shape}`;
-  const buf=stlBin(verts, tris, name); const url='data:application/octet-stream;base64,'+b64(buf);
-  const a=document.createElement('a'); a.href=url; a.download=name+'.stl'; document.body.appendChild(a); a.click(); a.remove();
-  setStatus('完了 / Done','#10b981');
+    const name=`geo-ball_D${fmt(D)}_F${fmt(T)}_L${fmt(L)}_${pattern}_${shape}`;
+    const buf=stlBin(verts, tris, name);
+    const blob=new Blob([buf], {type:'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=name+'.stl'; document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    setStatus('完了 / Done','#10b981');
+  }catch(err){
+    console.error(err);
+    setStatus(err.message || 'エラー / Error','#ef4444');
+  }
 });
 
-document.getElementById('regen').addEventListener('click',()=>{ rebuildPreview(); fit(); setStatus('更新 / Updated','#374151') });
-document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#374151') }));
-document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#374151') }));
+function safeUpdate(){
+  try{
+    rebuildPreview();
+    fit();
+    setStatus('更新 / Updated','#374151');
+  }catch(err){
+    console.error(err);
+    setStatus(err.message || 'エラー / Error','#ef4444');
+  }
+}
+
+document.getElementById('regen').addEventListener('click', safeUpdate);
+document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change', safeUpdate));
+document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change', safeUpdate));
 
 // init
 resize();
-rebuildPreview(); fit();
+safeUpdate();
 requestAnimationFrame(frame);
 </script>
 </body>
