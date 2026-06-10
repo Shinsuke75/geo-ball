@@ -6,7 +6,7 @@
 <title>geo-ball (UI v12.0.0)</title>
 <style>
   :root{
-    --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#3b82f6;
+    --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#111827;
     --radius:14px; --shadow:0 6px 20px rgba(0,0,0,.06);
   }
   *{box-sizing:border-box}
@@ -30,7 +30,7 @@
     padding:8px 12px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;
     font-size:14px;cursor:pointer;user-select:none;white-space:nowrap
   }
-  .seg input:checked + label{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+  .seg input:checked + label{border-color:#111827;box-shadow:0 0 0 3px rgba(17,24,39,.15)}
   .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap}
   .toolbar .left-help{font-size:12px;color:var(--muted)}
   .actions{display:flex;gap:10px;flex-wrap:wrap}
@@ -382,9 +382,9 @@ document.getElementById('export').addEventListener('click',()=>{
   setStatus('完了 / Done','#10b981');
 });
 
-document.getElementById('regen').addEventListener('click',()=>{ rebuildPreview(); fit(); setStatus('更新 / Updated','#3b82f6') });
-document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#3b82f6') }));
-document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#3b82f6') }));
+document.getElementById('regen').addEventListener('click',()=>{ rebuildPreview(); fit(); setStatus('更新 / Updated','#374151') });
+document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#374151') }));
+document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#374151') }));
 
 // init
 resize();
