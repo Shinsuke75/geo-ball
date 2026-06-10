@@ -241,7 +241,7 @@ scene.background=new THREE.Color(0xffffff);
 const camera=new THREE.PerspectiveCamera(40, 1, 0.1, 100000);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-scene.add(new THREE.HemisphereLight(0xddeeff, 0xb0b8c4, 0.45));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 0.45));
 const keyLight=new THREE.DirectionalLight(0xffffff, 1.0);
 keyLight.castShadow=true;
 keyLight.shadow.mapSize.set(1024,1024);
@@ -249,7 +249,7 @@ scene.add(keyLight);
 const fillLight=new THREE.DirectionalLight(0xffffff, 0.35);
 scene.add(fillLight);
 
-const material=new THREE.MeshStandardMaterial({color:0x4f8ef7, metalness:0.18, roughness:0.42, side:THREE.DoubleSide});
+const material=new THREE.MeshStandardMaterial({color:0xcccccc, metalness:0.15, roughness:0.55, side:THREE.DoubleSide});
 const yawGroup=new THREE.Group();
 const pitchGroup=new THREE.Group();
 yawGroup.add(pitchGroup);
