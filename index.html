@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>geo-ball (UI v11.6.0)</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#3b82f6;
+    --radius:14px; --shadow:0 6px 20px rgba(0,0,0,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#fff;color:#111827;margin:0}
+  main{max-width:1000px;margin:0 auto;padding:20px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  h1{font-size:22px;margin:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .grid{display:grid;grid-template-columns:repeat(4, minmax(200px,1fr));gap:12px}
+  @media (max-width:900px){ .grid{grid-template-columns:repeat(2, minmax(200px,1fr))} }
+  @media (max-width:560px){ .grid{grid-template-columns:1fr} }
+  .field{display:flex;flex-direction:column}
+  .field > .label{font-size:12px;color:#374151;margin-bottom:6px}
+  input[type="number"]{width:100%;background:#fff;border:1px solid #cbd5e1;color:#111827;border-radius:12px;padding:10px 12px;font-size:14px}
+  input[type="number"]:focus{outline:none;box-shadow:0 0 0 3px rgba(59,130,246,.35);border-color:#93c5fd}
+  .seg{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .seg input{display:none}
+  .seg label{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:8px 12px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;
+    font-size:14px;cursor:pointer;user-select:none;white-space:nowrap
+  }
+  .seg input:checked + label{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap}
+  .toolbar .left-help{font-size:12px;color:var(--muted)}
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{appearance:none;border:1px solid transparent;border-radius:12px;padding:10px 14px;font-weight:600;cursor:pointer;transition:transform .02s, box-shadow .15s;box-shadow:0 1px 2px rgba(0,0,0,.06);user-select:none}
+  .btn:active{transform:translateY(1px)}
+  .btn:focus-visible{outline:3px solid #0000; box-shadow:0 0 0 3px var(--ring)}
+  .btn-primary{background:#2563eb;color:#fff}
+  .btn-outline{background:transparent;border-color:#2563eb;color:#2563eb}
+  #viewwrap{height:560px}
+  canvas{width:100%;height:100%;border:1px solid var(--line);border-radius:var(--radius);background:#fff;cursor:grab}
+  .statusbar{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}
+  .status-left{display:flex;align-items:center;gap:10px}
+  .status-dot{width:10px;height:10px;border-radius:50%;background:#10b981;border:1px solid #0ea5a3}
+  small{color:#6b7280}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>geo-ball</h1>
+  </header>
+
+  <section class="card">
+    <div class="grid" role="group" aria-label="パラメータ / Parameters">
+      <div class="field">
+        <div class="label">穴の形状 / Hole Pattern</div>
+        <div class="seg" role="radiogroup" aria-label="Hole Pattern">
+          <!-- Only Triangle & Hexagon -->
+          <input type="radio" id="pat-tri" name="pattern" value="tri" checked>
+          <label for="pat-tri">三角 / Triangle</label>
+          <input type="radio" id="pat-hex" name="pattern" value="hex">
+          <label for="pat-hex">六角 / Hexagon</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">断面形状 / Beam Shape</div>
+        <div class="seg" role="radiogroup" aria-label="Beam Shape">
+          <!-- Order: Triangle, Square, Circle -->
+          <input type="radio" id="shape-tri" name="beamshape" value="triangle" checked>
+          <label for="shape-tri">三角 / Triangle</label>
+          <input type="radio" id="shape-square" name="beamshape" value="square">
+          <label for="shape-square">四角 / Square</label>
+          <input type="radio" id="shape-circle" name="beamshape" value="circle">
+          <label for="shape-circle">円 / Circle</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">直径 / Diameter (mm)</div>
+        <input id="diameter" type="number" value="50" step="1" min="5" inputmode="decimal">
+      </div>
+
+      <div class="field">
+        <div class="label">枠の太さ / Frame Thickness (mm)</div>
+        <input id="thickness" type="number" value="1.6" step="0.1" min="0.2" inputmode="decimal">
+      </div>
+
+      <div class="field">
+        <div class="label">形状分割レベル / Mesh Division Level (0–5)</div>
+        <input id="detail10" type="number" value="2" step="1" min="0" max="5" inputmode="numeric">
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="left-help">Drag: rotate · Right-drag: pan · Wheel: zoom</div>
+      <div class="actions">
+        <button id="regen" class="btn btn-primary">プレビュー更新 / Refresh</button>
+        <button id="export" class="btn btn-outline">STLを生成 / Export STL</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="viewwrap">
+    <canvas id="viewer" aria-label="プレビュー / Preview"></canvas>
+    <div class="statusbar" style="margin-top:10px">
+      <div class="status-left">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status">待機中 / Idle</span>
+      </div>
+      <small>三角は最下三角面、六角は最下頂点の周囲ポリゴン（多くは六角・一部五角）がz=0に面接地。</small>
+    </div>
+  </section>
+</main>
+
+<script>
+// ===== vector & helpers =====
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]], sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const sc=(a,s)=>[a[0]*s,a[1]*s,a[2]*s], len=a=>Math.hypot(a[0],a[1],a[2]);
+const norm=a=>{const l=len(a)||1; return [a[0]/l,a[1]/l,a[2]/l]}, cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+
+function icosahedron(){const t=(1+Math.sqrt(5))/2,s=1/Math.sqrt(1+t*t),a=s,b=t*s;
+const V=[[-a,b,0],[a,b,0],[-a,-b,0],[a,-b,0],[0,-a,b],[0,a,b],[0,-a,-b],[0,a,-b],[b,0,-a],[b,0,a],[-b,0,-a],[-b,0,a]];
+const F=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+return {V,F}}
+function subdivide({V,F},level){let verts=V.slice(),faces=F.slice(),mid=new Map();
+ function midIndex(i1,i2){const k=i1<i2?i1+'_'+i2:i2+'_'+i1; if(mid.has(k))return mid.get(k);
+  const m=sc(add(verts[i1],verts[i2]),0.5); const idx=verts.length; verts.push(m); mid.set(k,idx); return idx}
+ for(let l=0;l<level;l++){const f2=[]; mid.clear(); for(const [a,b,c] of faces){const ab=midIndex(a,b),bc=midIndex(b,c),ca=midIndex(c,a); f2.push([a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca])} faces=f2}
+ return {V:verts,F:faces}}
+const projectToSphere=(V,R)=>V.map(v=>{const u=norm(v); return [u[0]*R,u[1]*R,u[2]*R]});
+const uniqueEdges=F=>{const S=new Set(); const addE=(a,b)=>S.add(a<b?a+'_'+b:b+'_'+a); for(const f of F){addE(f[0],f[1]);addE(f[1],f[2]);addE(f[2],f[0])} return [...S].map(k=>k.split('_').map(Number))};
+function faceCentersOnSphere(V,F,R){const C=[]; for(const f of F){const a=V[f[0]],b=V[f[1]],c=V[f[2]]; const avg=[(a[0]+b[0]+c[0])/3,(a[1]+b[1]+c[1])/3,(a[2]+b[2]+c[2])/3]; const u=norm(avg); C.push([u[0]*R,u[1]*R,u[2]*R])} return C}
+function dualEdges(F){const map=new Map(); const addE=(a,b,fi)=>{const k=(a<b)?a+'_'+b:b+'_'+a; if(!map.has(k)) map.set(k,[]); map.get(k).push(fi)};
+ for(let fi=0; fi<F.length; fi++){const [a,b,c]=F[fi]; addE(a,b,fi); addE(b,c,fi); addE(c,a,fi)} const dual=[]; for(const faces of map.values()){ if(faces.length===2) dual.push([faces[0],faces[1]]) } return dual }
+
+// ===== Orientation utilities =====
+function rotationFromTo(a,b){
+  const v=cross(a,b); const c=dot(a,b);
+  if(c<-0.999999){ const axis = Math.abs(a[0])<0.9 ? [1,0,0] : [0,1,0]; const v2=cross(a,axis); const n=norm(v2);
+    const x=n[0],y=n[1],z=n[2]; const cc=-1, ss=0, tt=1-cc;
+    const Rm=[[tt*x*x+cc,tt*x*y-ss*z,tt*x*z+ss*y],[tt*x*y+ss*z,tt*y*y+cc,tt*y*z-ss*x],[tt*x*z-ss*y,tt*y*z+ss*x,tt*z*z+cc]];
+    return p=>[Rm[0][0]*p[0]+Rm[0][1]*p[1]+Rm[0][2]*p[2], Rm[1][0]*p[0]+Rm[1][1]*p[1]+Rm[1][2]*p[2], Rm[2][0]*p[0]+Rm[2][1]*p[1]+Rm[2][2]*p[2]];
+  }
+  const k=1/(1+c+1e-9);
+  const vx=[[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]];
+  function matMulVec(M,x){return [M[0][0]*x[0]+M[0][1]*x[1]+M[0][2]*x[2], M[1][0]*x[0]+M[1][1]*x[1]+M[1][2]*x[2], M[2][0]*x[0]+M[2][1]*x[1]+M[2][2]*x[2]]}
+  function matAdd(A,B){return [[A[0][0]+B[0][0],A[0][1]+B[0][1],A[0][2]+B[0][2]],[A[1][0]+B[1][0],A[1][1]+B[1][1],A[1][2]+B[1][2]],[A[2][0]+B[2][0],A[2][1]+B[2][1],A[2][2]+B[2][2]]]}
+  function matMul(A,B){const r=[[0,0,0],[0,0,0],[0,0,0]]; for(let i=0;i<3;i++)for(let j=0;j<3;j++)for(let t=0;t<3;t++)r[i][j]+=A[i][t]*B[t][j]; return r}
+  const I=[[1,0,0],[0,1,0],[0,0,1]];
+  const vx2=matMul(vx,vx);
+  const R=matAdd(I, matAdd(vx, [[vx2[0][0]*k,vx2[0][1]*k,vx2[0][2]*k],[vx2[1][0]*k,vx2[1][1]*k,vx2[1][2]*k],[vx2[2][0]*k,vx2[2][1]*k,vx2[2][2]*k]]));
+  return p=>matMulVec(R,p);
+}
+
+function orientTriangle(nodes, baseGeom){
+  let minZ=Infinity, best=null, V=baseGeom.V, F=baseGeom.F;
+  for(const f of F){ const a=V[f[0]],b=V[f[1]],c=V[f[2]]; const centroid=[(a[0]+b[0]+c[0])/3,(a[1]+b[1]+c[1])/3,(a[2]+b[2]+c[2])/3]; if(centroid[2]<minZ){minZ=centroid[2]; best=f} }
+  const a=baseGeom.V[best[0]], b=baseGeom.V[best[1]], c=baseGeom.V[best[2]];
+  const n=norm(cross(sub(b,a),sub(c,a))); const rot=rotationFromTo(n,[0,0,-1]);
+  return nodes.map(rot);
+}
+function orientHex(nodes, baseGeom){
+  const V=baseGeom.V; let minZ=Infinity, bestIdx=0;
+  for(let i=0;i<V.length;i++){ if(V[i][2]<minZ){minZ=V[i][2]; bestIdx=i} }
+  const vdir=norm(V[bestIdx]); const rot=rotationFromTo(vdir,[0,0,-1]);
+  return nodes.map(rot);
+}
+
+// ===== viewer =====
+const canvas=document.getElementById('viewer'); const ctx=canvas.getContext('2d'); let W=0,H=0,DPR=1;
+function resize(){DPR=window.devicePixelRatio||1; W=canvas.clientWidth; H=canvas.clientHeight; canvas.width=Math.floor(W*DPR); canvas.height=Math.floor(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0)} window.addEventListener('resize',()=>{resize(); fit();}); resize();
+let yaw=0, zoom=1, panX=0, panY=0, vyaw=0, vpx=0, vpy=0, dragging=false, rightDrag=false, lx=0, ly=0;
+canvas.addEventListener('mousedown',e=>{dragging=true; rightDrag=(e.button===2); lx=e.clientX; ly=e.clientY; canvas.style.cursor='grabbing'});
+window.addEventListener('mouseup',()=>{dragging=false; canvas.style.cursor='grab'}); canvas.addEventListener('mouseleave',()=>{dragging=false; canvas.style.cursor='grab'});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('mousemove',e=>{ if(!dragging) return; const dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY; if(rightDrag){vpx+=dx; vpy+=dy}else{vyaw+=dx*0.008}});
+canvas.addEventListener('wheel',e=>{ zoom *= (e.deltaY>0)?(1/1.25):1.25; zoom=Math.max(0.5,Math.min(500,zoom)); }, {passive:true});
+const rotY=(v,a)=>{const c=Math.cos(a),s=Math.sin(a); return [ c*v[0]+s*v[2], v[1], -s*v[0]+c*v[2] ]};
+function project(p){ const base=340, d=base/zoom, z=p[2]+d, f=(Math.min(W,H)*0.46)/z; return [ W/2 + panX + p[0]*f, H/2 - (panY + p[1]*f) ]}
+function lineWidthPx(){ const T=parseFloat(document.getElementById('thickness').value||'1.6'); return Math.max(0.6, T*zoom*0.25) }
+let PV=[], PE=[], centroid=[0,0,0];
+const centroidOf=V=>{let x=0,y=0,z=0; for(const p of V){x+=p[0];y+=p[1];z+=p[2]} const n=V.length||1; return [x/n,y/n,z/n]};
+function getPattern(){ return document.querySelector('input[name="pattern"]:checked').value }
+function getBeamShape(){ return document.querySelector('input[name="beamshape"]:checked').value }
+
+function rebuildPreview(){
+  const D=parseFloat(document.getElementById('diameter').value||'50'), R=D/2;
+  const L=parseInt(document.getElementById('detail10').value||'2',10);
+  const pattern=getPattern();
+
+  const ico=icosahedron(); const sub=(L>0)?subdivide(ico,L):ico;
+  const baseV=projectToSphere(sub.V, R);
+  let nodes=[], edges=[];
+  if(pattern==='tri'){ nodes=baseV; edges=uniqueEdges(sub.F); }
+  else { nodes=faceCentersOnSphere(baseV, sub.F, R); edges=dualEdges(sub.F); }
+  const baseGeom={V:baseV, F:sub.F};
+  const oriented=(pattern==='tri')?orientTriangle(nodes, baseGeom):orientHex(nodes, baseGeom);
+  PV=oriented; PE=edges;
+  centroid=centroidOf(PV);
+}
+
+function fit(){ const D=parseFloat(document.getElementById('diameter').value||'50'), R=D/2, base=340, target=0.32; const z=(R>0)?(base*target/(0.46*R)):1; zoom=Math.max(0.5, Math.min(500,z)); yaw=0; panX=0; panY=0 }
+function frame(){ yaw+=vyaw; vyaw*=0.9; panX+=vpx; panY+=vpy; vpx*=0.85; vpy*=0.85; ctx.clearRect(0,0,W,H);
+  const TV=PV.map(v=>rotY(sub(v,centroid), yaw)); const back=[], front=[];
+  for(const [i,j] of PE){ const z=(TV[i][2]+TV[j][2])*0.5; (z>0?back:front).push([i,j]) }
+  ctx.strokeStyle="#cfd8dc"; ctx.lineWidth=lineWidthPx(); for(const [i,j] of back){ const a=project(TV[i]), b=project(TV[j]); ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); }
+  ctx.strokeStyle="#111"; ctx.lineWidth=lineWidthPx(); for(const [i,j] of front){ const a=project(TV[i]), b=project(TV[j]); ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); }
+  requestAnimationFrame(frame);
+}
+
+// ===== Export (flooring, clamp, degenerate cull) =====
+function makeWelder(eps){const map=new Map(),verts=[]; const key=p=>Math.round(p[0]/eps)+','+Math.round(p[1]/eps)+','+Math.round(p[2]/eps); return {add(p){const k=key(p); if(map.has(k)) return map.get(k); const i=verts.length; verts.push(p); map.set(k,i); return i}, verts}}
+function beam(A,B,t,shape,nA,nB,welder){ const tris=[]; const d=sub(B,A), L=len(d); if(L<1e-6) return tris; const dir=[d[0]/L,d[1]/L,d[2]/L]; const n=norm([nA[0]+nB[0],nA[1]+nB[1],nA[2]+nB[2]]);
+  let side=norm(cross(dir,n)), up=norm(cross(side,dir)); const h=t*0.5, sides=(shape==='triangle')?3:(shape==='circle')?12:4;
+  const ra=[], rb=[]; for(let i=0;i<sides;i++){const ang=i/sides*Math.PI*2, s=Math.cos(ang)*h, u=Math.sin(ang)*h; ra.push([A[0]+side[0]*s+up[0]*u, A[1]+side[1]*s+up[1]*u, A[2]+side[2]*s+up[2]*u]); rb.push([B[0]+side[0]*s+up[0]*u, B[1]+side[1]*s+up[1]*u, B[2]+side[2]*s+up[2]*u])}
+  const ia=ra.map(p=>welder.add(p)), ib=rb.map(p=>welder.add(p)); for(let i=0;i<sides;i++){const j=(i+1)%sides; tris.push([ia[i],ia[j],ib[j]],[ia[i],ib[j],ib[i]])} for(let i=1;i<sides-1;i++){tris.push([ia[0],ia[i],ia[i+1]],[ib[0],ib[i+1],ib[i]])}
+  return tris }
+function icospheres(nodes,T,welder){const base=icosahedron(); const tris=[]; const factor=Math.max(0.6, Math.min(1.0, 0.6 + T*0.15)); const r=T*factor*0.5;
+  for(const p of nodes){ const vs=base.V.map(q=>{const u=norm(q); return [p[0]+u[0]*r, p[1]+u[1]*r, p[2]+u[2]*r]}); const ids=vs.map(v=>welder.add(v)); for(const f of base.F){tris.push([ids[f[0]],ids[f[1]],ids[f[2]]])} } return tris }
+function triArea(ia,ib,ic,V){const A=V[ia],B=V[ib],C=V[ic]; const ab=[B[0]-A[0],B[1]-A[1],B[2]-A[2]], ac=[C[0]-A[0],C[1]-A[1],C[2]-A[2]]; const cr=cross(ab,ac); return 0.5*Math.hypot(cr[0],cr[1],cr[2]); }
+function triNormal(ia,ib,ic,V){const A=V[ia],B=V[ib],C=V[ic]; const ab=[B[0]-A[0],B[1]-A[1],B[2]-A[2]], ac=[C[0]-A[0],C[1]-A[1],C[2]-A[2]]; const n=norm(cross(ab,ac)); return n}
+function stlBin(verts,tris,name){const triCount=tris.length, header=new ArrayBuffer(80), title=new TextEncoder().encode((name+' '.repeat(80)).slice(0,80));
+ new Uint8Array(header).set(title); const body=new ArrayBuffer(4+triCount*50), dv=new DataView(body); dv.setUint32(0,triCount,true); let offset=4;
+  for(const [ia,ib,ic] of tris){const n=triNormal(ia,ib,ic,verts), A=verts[ia],B=verts[ib],C=verts[ic]; const data=[n[0],n[1],n[2],A[0],A[1],A[2],B[0],B[1],B[2],C[0],C[1],C[2]]; for(let i=0;i<12;i++) dv.setFloat32(offset+i*4, data[i], true); dv.setUint16(offset+48, 0, true); offset+=50}
+  const out=new Uint8Array(80+body.byteLength); out.set(new Uint8Array(header),0); out.set(new Uint8Array(body),80); return out.buffer }
+const b64=buf=>{const CH=0x8000, bytes=new Uint8Array(buf); let bin=''; for(let i=0;i<bytes.length;i+=CH){bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH))} return btoa(bin)};
+function computeEps(T){ return Math.max(0.002, Math.min(0.02, T*0.003)); }
+const statusSpan=document.getElementById('status'); const statusDot=document.getElementById('status-dot');
+function setStatus(t,c){ statusSpan.textContent=t; statusDot.style.background=c; statusDot.style.borderColor=c }
+function fmt(x){const s=Number(x); return (Math.abs(s-Math.round(s))<1e-6)?String(Math.round(s)):String(Number(s.toFixed(1)))}
+
+document.getElementById('export').addEventListener('click',()=>{
+  setStatus('生成中 / Generating...','#f59e0b');
+  const D=parseFloat(document.getElementById('diameter').value||'50'), R=D/2;
+  const T=parseFloat(document.getElementById('thickness').value||'1.6');
+  const L=parseInt(document.getElementById('detail10').value||'2',10);
+  const pattern=getPattern();
+  const shape=getBeamShape();
+  const eps=computeEps(T);
+
+  const ico=icosahedron(); const sub=(L>0)?subdivide(ico,L):ico; const baseV=projectToSphere(sub.V, R);
+  let nodes=[], edges=[];
+  if(pattern==='tri'){ nodes=baseV; edges=uniqueEdges(sub.F); }
+  else { nodes=faceCentersOnSphere(baseV, sub.F, R); edges=dualEdges(sub.F); }
+  const baseGeom={V:baseV, F:sub.F};
+  const oriented=(pattern==='tri')?orientTriangle(nodes, baseGeom):orientHex(nodes, baseGeom);
+
+  const normals=oriented.map(v=>norm(v)); const welder=makeWelder(eps); let tris=[];
+  for(const [i,j] of edges){ tris=tris.concat(beam(oriented[i],oriented[j],T,shape,normals[i],normals[j],welder)); }
+  tris = tris.concat(icospheres(oriented,T,welder));
+
+  // floor to z=0 and clamp tiny negatives
+  let minZ = Infinity;
+  for(const v of welder.verts){ if(v[2] < minZ) minZ = v[2]; }
+  if(isFinite(minZ) && minZ !== 0){ for(const v of welder.verts){ v[2] -= minZ; } }
+  for(const v of welder.verts){ if(v[2] < 1e-7) v[2] = 0; }
+
+  // remove degenerate triangles
+  const AREA_EPS = 1e-10;
+  tris = tris.filter(([a,b,c])=> triArea(a,b,c,welder.verts) > AREA_EPS );
+
+  const name=`geo-ball_D${fmt(D)}_F${fmt(T)}_L${fmt(L)}_${pattern}_${shape}`;
+  const buf=stlBin(welder.verts, tris, name); const url='data:application/octet-stream;base64,'+b64(buf);
+  const a=document.createElement('a'); a.href=url; a.download=name+'.stl'; document.body.appendChild(a); a.click(); a.remove();
+  setStatus('完了 / Done','#10b981');
+});
+
+document.getElementById('regen').addEventListener('click',()=>{ rebuildPreview(); fit(); setStatus('更新 / Updated','#3b82f6') });
+document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change',()=>{ rebuildPreview(); setStatus('更新 / Updated','#3b82f6') }));
+document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change',()=>{ setStatus('更新 / Updated','#3b82f6') }));
+// init
+const viewer=document.getElementById('viewer'); viewer.width=viewer.clientWidth; viewer.height=viewer.clientHeight;
+rebuildPreview(); fit(); (function loop(){ requestAnimationFrame(loop); frame(); })();
+</script>
+</body>
+</html>
