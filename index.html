@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>geo-ball (UI v12.0.0)</title>
+<title>geo-ball (UI v12.1.0)</title>
 <style>
   :root{
     --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#111827;
@@ -40,7 +40,7 @@
   .btn-primary{background:#111827;color:#fff}
   .btn-outline{background:transparent;border-color:#111827;color:#111827}
   #viewwrap{height:560px}
-  canvas{width:100%;height:100%;border:1px solid var(--line);border-radius:var(--radius);background:#fff;cursor:grab;display:block}
+  canvas{width:100%;height:100%;border:1px solid var(--line);border-radius:var(--radius);background:#fff;cursor:grab;display:block;touch-action:none}
   .statusbar{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}
   .status-left{display:flex;align-items:center;gap:10px}
   .status-dot{width:10px;height:10px;border-radius:50%;background:#10b981;border:1px solid #0ea5a3}
@@ -96,7 +96,7 @@
     </div>
 
     <div class="toolbar">
-      <div class="left-help">Drag: rotate · Right-drag: pan · Wheel: zoom</div>
+      <div class="left-help">Drag / 1-finger: rotate · Right-drag: pan · Wheel / pinch: zoom</div>
       <div class="actions">
         <button id="regen" class="btn btn-primary">プレビュー更新 / Refresh</button>
         <button id="export" class="btn btn-outline">STLを生成 / Export STL</button>
@@ -117,7 +117,20 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- CDN fallback: if the primary CDN is unreachable, load Three.js from a secondary source -->
 <script>
+if(!window.THREE){
+  document.write('<scr'+'ipt src="https://unpkg.com/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');
+}
+</script>
+
+<!-- ============================================================
+     Pure geometry engine (no DOM / no Three.js dependencies).
+     This block is NOT executed directly. Its text is used both to
+     spawn a Web Worker (so heavy meshing never blocks the UI) and
+     as a synchronous fallback when Workers are unavailable.
+     ============================================================ -->
+<script id="geom-worker" type="text/plain">
 // ===== vector & helpers =====
 const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]], sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
 const sc=(a,s)=>[a[0]*s,a[1]*s,a[2]*s], len=a=>Math.hypot(a[0],a[1],a[2]);
@@ -172,7 +185,7 @@ function orientHex(nodes, baseGeom){
   return nodes.map(rot);
 }
 
-// ===== shared geometry build (preview & export) =====
+// ===== shared geometry build =====
 function makeWelder(eps){const map=new Map(),verts=[]; const key=p=>Math.round(p[0]/eps)+','+Math.round(p[1]/eps)+','+Math.round(p[2]/eps); return {add(p){const k=key(p); if(map.has(k)) return map.get(k); const i=verts.length; verts.push(p); map.set(k,i); return i}, verts}}
 function beam(A,B,t,shape,nA,nB,welder){ const tris=[]; const d=sub(B,A), L=len(d); if(L<1e-6) return tris; const dir=[d[0]/L,d[1]/L,d[2]/L]; const n=norm([nA[0]+nB[0],nA[1]+nB[1],nA[2]+nB[2]]);
   let side=norm(cross(dir,n)), up=norm(cross(side,dir)); const h=t*0.5, sides=(shape==='triangle')?3:(shape==='circle')?12:4;
@@ -182,7 +195,6 @@ function beam(A,B,t,shape,nA,nB,welder){ const tris=[]; const d=sub(B,A), L=len(
 function icospheres(nodes,T,welder){const base=icosahedron(); const tris=[]; const factor=Math.max(0.6, Math.min(1.0, 0.6 + T*0.15)); const r=T*factor*0.5;
   for(const p of nodes){ const vs=base.V.map(q=>{const u=norm(q); return [p[0]+u[0]*r, p[1]+u[1]*r, p[2]+u[2]*r]}); const ids=vs.map(v=>welder.add(v)); for(const f of base.F){tris.push([ids[f[0]],ids[f[1]],ids[f[2]]])} } return tris }
 function triArea(ia,ib,ic,V){const A=V[ia],B=V[ib],C=V[ic]; const ab=[B[0]-A[0],B[1]-A[1],B[2]-A[2]], ac=[C[0]-A[0],C[1]-A[1],C[2]-A[2]]; const cr=cross(ab,ac); return 0.5*Math.hypot(cr[0],cr[1],cr[2]); }
-function triNormal(ia,ib,ic,V){const A=V[ia],B=V[ib],C=V[ic]; const ab=[B[0]-A[0],B[1]-A[1],B[2]-A[2]], ac=[C[0]-A[0],C[1]-A[1],C[2]-A[2]]; const n=norm(cross(ab,ac)); return n}
 function computeEps(T){ return Math.max(0.002, Math.min(0.02, T*0.003)); }
 
 function buildOriented(D,T,L,pattern){
@@ -215,11 +227,25 @@ function buildMeshTris(oriented, edges, T, shape){
   return {verts:welder.verts, tris};
 }
 
+// Single entry point used by both the worker and the sync fallback.
+function buildAll(p){
+  const {oriented, edges}=buildOriented(p.D, p.T, p.L, p.pattern);
+  return buildMeshTris(oriented, edges, p.T, p.shape);
+}
+</script>
+
+<script>
+// ===== minimal vector helpers (main thread, used by the STL writer) =====
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const normv=a=>{const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l]};
+function triNormal(ia,ib,ic,V){const A=V[ia],B=V[ib],C=V[ic]; const ab=[B[0]-A[0],B[1]-A[1],B[2]-A[2]], ac=[C[0]-A[0],C[1]-A[1],C[2]-A[2]]; return normv(cross(ab,ac));}
+
 // ===== STL writer (export) =====
 function stlBin(verts,tris,name){const triCount=tris.length, header=new ArrayBuffer(80), title=new TextEncoder().encode((name+' '.repeat(80)).slice(0,80));
  new Uint8Array(header).set(title); const body=new ArrayBuffer(4+triCount*50), dv=new DataView(body); dv.setUint32(0,triCount,true); let offset=4;
   for(const [ia,ib,ic] of tris){const n=triNormal(ia,ib,ic,verts), A=verts[ia],B=verts[ib],C=verts[ic]; const data=[n[0],n[1],n[2],A[0],A[1],A[2],B[0],B[1],B[2],C[0],C[1],C[2]]; for(let i=0;i<12;i++) dv.setFloat32(offset+i*4, data[i], true); dv.setUint16(offset+48, 0, true); offset+=50}
   const out=new Uint8Array(80+body.byteLength); out.set(new Uint8Array(header),0); out.set(new Uint8Array(body),80); return out.buffer }
+
 const statusSpan=document.getElementById('status'); const statusDot=document.getElementById('status-dot');
 function setStatus(t,c){ statusSpan.textContent=t; statusDot.style.background=c; statusDot.style.borderColor=c }
 function fmt(x){const s=Number(x); return (Math.abs(s-Math.round(s))<1e-6)?String(Math.round(s)):String(Number(s.toFixed(1)))}
@@ -251,53 +277,94 @@ function getParams(){
   };
 }
 
+// ===== geometry computation: Web Worker with synchronous fallback =====
+// Heavy meshing runs off the main thread so the UI never freezes at high
+// division levels. If Workers are unavailable, we fall back to running the
+// same code synchronously (deferred a tick so the status text can paint).
+const geomSrc=document.getElementById('geom-worker').textContent;
+let geomWorker=null;
+try{
+  const workerBody=geomSrc+'\nself.onmessage=function(e){try{var r=buildAll(e.data);self.postMessage({id:e.data.id,ok:true,verts:r.verts,tris:r.tris});}catch(err){self.postMessage({id:e.data.id,ok:false,error:String((err&&err.message)||err)});}};';
+  const blob=new Blob([workerBody],{type:'application/javascript'});
+  geomWorker=new Worker(URL.createObjectURL(blob));
+}catch(e){ geomWorker=null; }
+let buildAllSync=null;
+try{ buildAllSync=new Function(geomSrc+'\nreturn buildAll;')(); }catch(e){ buildAllSync=null; }
+
+let _reqSeq=0;
+function computeGeometry(params){
+  return new Promise((resolve,reject)=>{
+    const runSync=()=>{ setTimeout(()=>{ try{ resolve(buildAllSync(params)); }catch(e){ reject(e); } },0); };
+    if(geomWorker){
+      const id=++_reqSeq;
+      const cleanup=()=>{ geomWorker.removeEventListener('message',onMsg); geomWorker.removeEventListener('error',onErr); };
+      const onMsg=ev=>{ if(ev.data.id!==id) return; cleanup(); if(ev.data.ok) resolve({verts:ev.data.verts,tris:ev.data.tris}); else reject(new Error(ev.data.error)); };
+      const onErr=err=>{ cleanup(); if(buildAllSync){ runSync(); } else { reject(err instanceof Error?err:new Error('Worker error')); } };
+      geomWorker.addEventListener('message',onMsg);
+      geomWorker.addEventListener('error',onErr);
+      geomWorker.postMessage(Object.assign({id},params));
+    } else if(buildAllSync){
+      runSync();
+    } else {
+      reject(new Error('ジオメトリエンジンの初期化に失敗しました / Geometry engine failed to initialize.'));
+    }
+  });
+}
+
 // ===== 3D viewer (Three.js) =====
 const canvas=document.getElementById('viewer');
-const renderer=new THREE.WebGLRenderer({canvas, antialias:true, alpha:true, preserveDrawingBuffer:false});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
-renderer.shadowMap.enabled=true;
-renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.outputEncoding = THREE.sRGBEncoding;
-
-const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xffffff);
-
-const camera=new THREE.PerspectiveCamera(40, 1, 0.1, 100000);
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 0.45));
-const keyLight=new THREE.DirectionalLight(0xffffff, 1.0);
-keyLight.castShadow=true;
-keyLight.shadow.mapSize.set(1024,1024);
-scene.add(keyLight);
-scene.add(keyLight.target);
-const fillLight=new THREE.DirectionalLight(0xffffff, 0.35);
-scene.add(fillLight);
-
-const material=new THREE.MeshStandardMaterial({color:0x3a3a3a, metalness:0.15, roughness:0.55, side:THREE.DoubleSide});
-const yawGroup=new THREE.Group();
-const pitchGroup=new THREE.Group();
-yawGroup.add(pitchGroup);
-scene.add(yawGroup);
-let mesh=new THREE.Mesh(new THREE.BufferGeometry(), material);
-mesh.castShadow=true; mesh.receiveShadow=true;
-pitchGroup.add(mesh);
-
-let ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.ShadowMaterial({opacity:0.16}));
-ground.rotation.x=-Math.PI/2;
-ground.receiveShadow=true;
-scene.add(ground);
-
+const hasTHREE = !!window.THREE;
+let renderer, scene, camera, material, yawGroup, pitchGroup, mesh, ground, keyLight, fillLight;
 let W=0,H=0;
-function resize(){ W=canvas.clientWidth; H=canvas.clientHeight; if(W===0||H===0) return; renderer.setSize(W,H,false); camera.aspect=W/H; camera.updateProjectionMatrix(); }
-window.addEventListener('resize', resize);
 
-// controls
+// controls state (kept regardless of Three.js availability)
 let dragging=false, rightDrag=false, lx=0, ly=0;
 let yaw=0.55, pitch=0.32, vyaw=0, vpitch=0;
 let panX=0, panY=0, vpx=0, vpy=0;
 let dist=200, vdist=0, minDist=10, maxDist=10000;
 
+function resize(){ if(!hasTHREE) return; W=canvas.clientWidth; H=canvas.clientHeight; if(W===0||H===0) return; renderer.setSize(W,H,false); camera.aspect=W/H; camera.updateProjectionMatrix(); }
+
+if(hasTHREE){
+  renderer=new THREE.WebGLRenderer({canvas, antialias:true, alpha:true, preserveDrawingBuffer:false});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0xffffff);
+
+  camera=new THREE.PerspectiveCamera(40, 1, 0.1, 100000);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 0.45));
+  keyLight=new THREE.DirectionalLight(0xffffff, 1.0);
+  keyLight.castShadow=true;
+  keyLight.shadow.mapSize.set(1024,1024);
+  scene.add(keyLight);
+  scene.add(keyLight.target);
+  fillLight=new THREE.DirectionalLight(0xffffff, 0.35);
+  scene.add(fillLight);
+
+  material=new THREE.MeshStandardMaterial({color:0x3a3a3a, metalness:0.15, roughness:0.55, side:THREE.DoubleSide});
+  yawGroup=new THREE.Group();
+  pitchGroup=new THREE.Group();
+  yawGroup.add(pitchGroup);
+  scene.add(yawGroup);
+  mesh=new THREE.Mesh(new THREE.BufferGeometry(), material);
+  mesh.castShadow=true; mesh.receiveShadow=true;
+  pitchGroup.add(mesh);
+
+  ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.ShadowMaterial({opacity:0.16}));
+  ground.rotation.x=-Math.PI/2;
+  ground.receiveShadow=true;
+  scene.add(ground);
+
+  window.addEventListener('resize', resize);
+}
+
+// ===== pointer / touch controls =====
 canvas.addEventListener('mousedown', e=>{ dragging=true; rightDrag=(e.button===2); lx=e.clientX; ly=e.clientY; canvas.style.cursor='grabbing'; });
 window.addEventListener('mouseup', ()=>{ dragging=false; canvas.style.cursor='grab'; });
 canvas.addEventListener('mouseleave', ()=>{ dragging=false; canvas.style.cursor='grab'; });
@@ -309,6 +376,33 @@ canvas.addEventListener('mousemove', e=>{
   else { vyaw += dx*0.007; vpitch += dy*0.007; }
 });
 canvas.addEventListener('wheel', e=>{ vdist += (e.deltaY>0?1:-1)*dist*0.08; }, {passive:true});
+
+// Touch: 1 finger = rotate, 2 fingers = pinch zoom + two-finger pan
+let pinchDist=0, touchPanX=0, touchPanY=0;
+function touchDistance(t){ const dx=t[0].clientX-t[1].clientX, dy=t[0].clientY-t[1].clientY; return Math.hypot(dx,dy); }
+function touchMidpoint(t){ return [ (t[0].clientX+t[1].clientX)/2, (t[0].clientY+t[1].clientY)/2 ]; }
+canvas.addEventListener('touchstart', e=>{
+  if(e.touches.length===1){ dragging=true; rightDrag=false; lx=e.touches[0].clientX; ly=e.touches[0].clientY; }
+  else if(e.touches.length>=2){ dragging=false; pinchDist=touchDistance(e.touches); const m=touchMidpoint(e.touches); touchPanX=m[0]; touchPanY=m[1]; }
+  e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchmove', e=>{
+  if(e.touches.length===1 && dragging){
+    const dx=e.touches[0].clientX-lx, dy=e.touches[0].clientY-ly; lx=e.touches[0].clientX; ly=e.touches[0].clientY;
+    vyaw += dx*0.007; vpitch += dy*0.007;
+  } else if(e.touches.length>=2){
+    const d=touchDistance(e.touches);
+    if(pinchDist>0){ vdist += (pinchDist-d)*dist*0.004; }
+    pinchDist=d;
+    const m=touchMidpoint(e.touches);
+    vpx -= (m[0]-touchPanX)*dist*0.0016; vpy += (m[1]-touchPanY)*dist*0.0016;
+    touchPanX=m[0]; touchPanY=m[1];
+  }
+  e.preventDefault();
+}, {passive:false});
+function endTouch(e){ if(!e.touches || e.touches.length===0){ dragging=false; } pinchDist=0; }
+canvas.addEventListener('touchend', endTouch);
+canvas.addEventListener('touchcancel', endTouch);
 
 function frame(){
   yaw += vyaw; vyaw*=0.9;
@@ -331,12 +425,16 @@ function frame(){
 }
 
 // ===== build preview geometry =====
-function rebuildPreview(){
+let _previewToken=0;
+async function rebuildPreview(){
+  if(!hasTHREE) return;
   const {D,T,L,pattern,shape}=getParams();
   const R=D/2;
 
-  const {oriented, edges}=buildOriented(D,T,L,pattern);
-  const {verts, tris}=buildMeshTris(oriented, edges, T, shape);
+  const token=++_previewToken;
+  const {verts, tris}=await computeGeometry({D,T,L,pattern,shape});
+  // a newer request superseded this one; drop the stale result
+  if(token!==_previewToken) return;
 
   // build buffers - remap Z-up (floor at z=0) to Three.js Y-up (floor at y=0)
   const positions=new Float32Array(verts.length*3);
@@ -345,7 +443,8 @@ function rebuildPreview(){
     positions[i*3+1] = verts[i][2];
     positions[i*3+2] = -verts[i][1];
   }
-  let useUint32 = verts.length > 65535;
+  // Uint16 indices can address vertices 0..65535, i.e. up to 65536 vertices.
+  let useUint32 = verts.length > 65536;
   const indices = useUint32 ? new Uint32Array(tris.length*3) : new Uint16Array(tris.length*3);
   for(let i=0;i<tris.length;i++){ indices[i*3]=tris[i][0]; indices[i*3+1]=tris[i][1]; indices[i*3+2]=tris[i][2]; }
 
@@ -377,6 +476,8 @@ function rebuildPreview(){
 
   minDist = radius*1.3;
   maxDist = radius*20;
+  // keep the current distance within the new bounds (without resetting the view)
+  dist = Math.max(minDist, Math.min(maxDist, dist));
 }
 
 function fit(){
@@ -386,13 +487,12 @@ function fit(){
 }
 
 // ===== Export =====
-document.getElementById('export').addEventListener('click',()=>{
+document.getElementById('export').addEventListener('click', async ()=>{
   try{
-    setStatus('生成中 / Generating...','#f59e0b');
     const {D,T,L,pattern,shape}=getParams();
+    setStatus('生成中 / Generating...','#f59e0b');
 
-    const {oriented, edges}=buildOriented(D,T,L,pattern);
-    const {verts, tris}=buildMeshTris(oriented, edges, T, shape);
+    const {verts, tris}=await computeGeometry({D,T,L,pattern,shape});
 
     const name=`geo-ball_D${fmt(D)}_F${fmt(T)}_L${fmt(L)}_${pattern}_${shape}`;
     const buf=stlBin(verts, tris, name);
@@ -407,10 +507,17 @@ document.getElementById('export').addEventListener('click',()=>{
   }
 });
 
-function safeUpdate(){
+// refit=true only re-frames the camera (initial load). User-triggered updates
+// preserve the current view so it doesn't jump around on every change.
+async function safeUpdate(refit){
   try{
-    rebuildPreview();
-    fit();
+    if(!hasTHREE){
+      setStatus('3Dライブラリの読み込みに失敗しました（プレビュー無効・STL出力は可能） / 3D library failed to load (preview disabled; STL export still works)','#ef4444');
+      return;
+    }
+    setStatus('生成中 / Generating...','#f59e0b');
+    await rebuildPreview();
+    if(refit) fit();
     setStatus('更新 / Updated','#374151');
   }catch(err){
     console.error(err);
@@ -418,14 +525,14 @@ function safeUpdate(){
   }
 }
 
-document.getElementById('regen').addEventListener('click', safeUpdate);
-document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change', safeUpdate));
-document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change', safeUpdate));
+document.getElementById('regen').addEventListener('click', ()=>safeUpdate(false));
+document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change', ()=>safeUpdate(false)));
+document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change', ()=>safeUpdate(false)));
 
 // init
 resize();
-safeUpdate();
-requestAnimationFrame(frame);
+safeUpdate(true);
+if(hasTHREE) requestAnimationFrame(frame);
 </script>
 </body>
 </html>
