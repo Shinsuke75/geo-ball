@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>geo-ball (UI v12.1.0)</title>
+<title>geo-ball (UI v12.2.0)</title>
 <style>
   :root{
     --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#111827;
@@ -288,8 +288,8 @@ try{
   const blob=new Blob([workerBody],{type:'application/javascript'});
   geomWorker=new Worker(URL.createObjectURL(blob));
 }catch(e){ geomWorker=null; }
-let buildAllSync=null;
-try{ buildAllSync=new Function(geomSrc+'\nreturn buildAll;')(); }catch(e){ buildAllSync=null; }
+let buildAllSync=null, geomExports=null;
+try{ geomExports=new Function(geomSrc+'\nreturn {buildAll, buildOriented};')(); buildAllSync=geomExports.buildAll; }catch(e){ buildAllSync=null; geomExports=null; }
 
 let _reqSeq=0;
 function computeGeometry(params){
@@ -308,6 +308,85 @@ function computeGeometry(params){
     } else {
       reject(new Error('ジオメトリエンジンの初期化に失敗しました / Geometry engine failed to initialize.'));
     }
+  });
+}
+
+// ===== watertight (manifold) export via the Manifold WASM library =====
+// Preview always uses the fast overlapping mesh above. STL export, however,
+// can produce a true watertight (2-manifold) solid by unioning a cylinder per
+// beam and a sphere per node with Manifold. This runs in a dedicated MODULE
+// worker so a pathological case can be hard-terminated on timeout without
+// freezing the page; on any failure/timeout the caller falls back to the
+// overlapping export, so an STL is ALWAYS produced.
+//
+// Empirically the boolean union is reliably fast and stable up to level 2 for
+// both patterns (a few ms). At level 3+ the exact-arithmetic union becomes
+// nondeterministic — sometimes milliseconds, sometimes runaway — so we don't
+// attempt Manifold there (no wasted wait) and fall back directly. The timeout
+// below is a safety net for any case that still misbehaves.
+const MANIFOLD_CDN='https://cdn.jsdelivr.net/npm/manifold-3d@3.5.1/manifold.js';
+function manifoldEligible(pattern, L){ return L<=2; }
+
+const MANIFOLD_WORKER_SRC=`
+import Module from '${MANIFOLD_CDN}';
+let wasmP=null;
+function getWasm(){ if(!wasmP){ wasmP=Module().then(w=>{ w.setup(); return w; }); } return wasmP; }
+const norm=a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l];};
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+// column-major 3x4 transform mapping +z -> dir and the origin -> A
+function frameTransform(dir,A){const z=norm(dir);let x=Math.abs(z[0])<0.9?[1,0,0]:[0,1,0];let y=norm(cross(z,x));x=norm(cross(y,z));return [x[0],x[1],x[2],y[0],y[1],y[2],z[0],z[1],z[2],A[0],A[1],A[2]];}
+self.onmessage=async function(e){
+  const {id,oriented,edges,T,shape}=e.data;
+  try{
+    const w=await getWasm(); const {Manifold}=w;
+    const rBeam=T*0.5, factor=Math.max(0.6,Math.min(1.0,0.6+T*0.15)), rNode=T*factor*0.5;
+    const seg=shape==='triangle'?3:shape==='circle'?12:4;
+    const solids=[];
+    for(const [i,j] of edges){
+      const A=oriented[i],B=oriented[j],d=[B[0]-A[0],B[1]-A[1],B[2]-A[2]],L=Math.hypot(d[0],d[1],d[2]);
+      if(L<1e-6) continue;
+      solids.push(Manifold.cylinder(L,rBeam,rBeam,seg,false).transform(frameTransform(d,A)));
+    }
+    for(const p of oriented){ solids.push(Manifold.sphere(rNode,16).translate(p)); }
+    let list=solids;
+    while(list.length>1){ const nx=[]; for(let i=0;i<list.length;i+=2){ if(i+1<list.length){ const u=Manifold.union(list[i],list[i+1]); list[i].delete(); list[i+1].delete(); nx.push(u);} else nx.push(list[i]); } list=nx; }
+    const res=list[0]; const mesh=res.getMesh(); res.delete();
+    const np=mesh.numProp, vp=mesh.vertProperties, tv=mesh.triVerts, nv=vp.length/np;
+    let minZ=Infinity; for(let i=0;i<nv;i++){ const z=vp[i*np+2]; if(z<minZ)minZ=z; }
+    const off=isFinite(minZ)?minZ:0;
+    const verts=new Array(nv);
+    for(let i=0;i<nv;i++){ let z=vp[i*np+2]-off; if(z<1e-7)z=0; verts[i]=[vp[i*np],vp[i*np+1],z]; }
+    const ntri=tv.length/3, tris=new Array(ntri);
+    for(let i=0;i<ntri;i++){ tris[i]=[tv[i*3],tv[i*3+1],tv[i*3+2]]; }
+    self.postMessage({id,ok:true,verts,tris});
+  }catch(err){ self.postMessage({id,ok:false,error:String((err&&err.message)||err)}); }
+};
+`;
+
+let manifoldWorker=null, _mReqSeq=0;
+function makeManifoldWorker(){
+  try{ const blob=new Blob([MANIFOLD_WORKER_SRC],{type:'application/javascript'}); return new Worker(URL.createObjectURL(blob),{type:'module'}); }
+  catch(e){ return null; }
+}
+// Build a watertight mesh in the worker, with a hard timeout. Rejects (and the
+// caller falls back) on timeout, worker error, or missing dependencies.
+function computeManifoldGeometry(params, timeoutMs){
+  return new Promise((resolve,reject)=>{
+    if(!geomExports){ reject(new Error('geometry engine unavailable')); return; }
+    if(!manifoldWorker){ manifoldWorker=makeManifoldWorker(); }
+    if(!manifoldWorker){ reject(new Error('manifold worker unavailable')); return; }
+    let oriented, edges;
+    try{ ({oriented, edges}=geomExports.buildOriented(params.D,params.T,params.L,params.pattern)); }
+    catch(e){ reject(e); return; }
+    const id=++_mReqSeq; let done=false;
+    const cleanup=()=>{ clearTimeout(timer); if(manifoldWorker){ manifoldWorker.removeEventListener('message',onMsg); manifoldWorker.removeEventListener('error',onErr); } };
+    const kill=()=>{ try{ manifoldWorker.terminate(); }catch(_){} manifoldWorker=null; };
+    const timer=setTimeout(()=>{ if(done)return; done=true; cleanup(); kill(); reject(new Error('manifold timeout')); }, timeoutMs);
+    const onMsg=ev=>{ if(done||ev.data.id!==id)return; done=true; cleanup(); if(ev.data.ok) resolve({verts:ev.data.verts,tris:ev.data.tris}); else reject(new Error(ev.data.error)); };
+    const onErr=err=>{ if(done)return; done=true; cleanup(); kill(); reject(err instanceof Error?err:new Error('manifold worker error')); };
+    manifoldWorker.addEventListener('message',onMsg);
+    manifoldWorker.addEventListener('error',onErr);
+    manifoldWorker.postMessage({id, oriented, edges, T:params.T, shape:params.shape});
   });
 }
 
@@ -487,20 +566,39 @@ function fit(){
 }
 
 // ===== Export =====
+const MANIFOLD_TIMEOUT_MS=8000;
 document.getElementById('export').addEventListener('click', async ()=>{
+  let params;
+  try{ params=getParams(); }catch(err){ setStatus(err.message || 'エラー / Error','#ef4444'); return; }
+  const {D,T,L,pattern,shape}=params;
   try{
-    const {D,T,L,pattern,shape}=getParams();
-    setStatus('生成中 / Generating...','#f59e0b');
+    let verts, tris, watertight=false;
 
-    const {verts, tris}=await computeGeometry({D,T,L,pattern,shape});
+    // Try a true watertight solid where the boolean union is known to be
+    // tractable. Any failure/timeout falls through to the overlapping export
+    // below, so an STL is always produced.
+    if(manifoldEligible(pattern,L)){
+      setStatus('水密メッシュ生成中 / Building watertight mesh...','#f59e0b');
+      try{
+        ({verts, tris}=await computeManifoldGeometry(params, MANIFOLD_TIMEOUT_MS));
+        watertight=true;
+      }catch(e){
+        console.warn('Manifold export unavailable, falling back to overlapping solid:', e);
+      }
+    }
 
-    const name=`geo-ball_D${fmt(D)}_F${fmt(T)}_L${fmt(L)}_${pattern}_${shape}`;
+    if(!watertight){
+      setStatus('生成中 / Generating...','#f59e0b');
+      ({verts, tris}=await computeGeometry({D,T,L,pattern,shape}));
+    }
+
+    const name=`geo-ball_D${fmt(D)}_F${fmt(T)}_L${fmt(L)}_${pattern}_${shape}${watertight?'_manifold':''}`;
     const buf=stlBin(verts, tris, name);
     const blob=new Blob([buf], {type:'application/octet-stream'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download=name+'.stl'; document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    setStatus('完了 / Done','#10b981');
+    setStatus(watertight ? '完了（水密） / Done (watertight)' : '完了 / Done','#10b981');
   }catch(err){
     console.error(err);
     setStatus(err.message || 'エラー / Error','#ef4444');
