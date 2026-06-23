@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>geo-ball (UI v12.2.1)</title>
+<title>geo-ball (UI v12.2.2)</title>
 <style>
   :root{
     --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#111827;
@@ -328,10 +328,18 @@ function computeGeometry(params){
 const MANIFOLD_CDN='https://cdn.jsdelivr.net/npm/manifold-3d@3.5.1/manifold.js';
 function manifoldEligible(pattern, L){ return L<=2; }
 
-const _mNorm=a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l];};
-const _mCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-// column-major 3x4 transform mapping +z -> dir and the origin -> A
-function _mFrame(dir,A){const z=_mNorm(dir);let x=Math.abs(z[0])<0.9?[1,0,0]:[0,1,0];let y=_mNorm(_mCross(z,x));x=_mNorm(_mCross(y,z));return [x[0],x[1],x[2],y[0],y[1],y[2],z[0],z[1],z[2],A[0],A[1],A[2]];}
+const _DEG=180/Math.PI;
+// Place a +z cylinder (base at the origin, height L) so its axis points along
+// `dir` with its base at A, using Manifold's own rotate/translate (rotations
+// are about the origin). Hand-built transform matrices proved error-prone, so
+// we orient with two unambiguous single-axis rotations: tilt from +z by the
+// polar angle, then spin to the azimuth.
+function _placeCylinder(Manifold, L, r, seg, dir, A){
+  const dz=Math.max(-1, Math.min(1, dir[2]/(Math.hypot(dir[0],dir[1],dir[2])||1)));
+  const theta=Math.acos(dz)*_DEG;             // tilt away from +z
+  const phi=Math.atan2(dir[1],dir[0])*_DEG;   // azimuth in the xy-plane
+  return Manifold.cylinder(L,r,r,seg,false).rotate([0,theta,0]).rotate([0,0,phi]).translate(A);
+}
 
 let _manifoldWasmP=null;
 function loadManifold(){
@@ -358,9 +366,9 @@ async function computeManifoldGeometry(params){
   for(const [i,j] of edges){
     const A=oriented[i],B=oriented[j],d=[B[0]-A[0],B[1]-A[1],B[2]-A[2]],L=Math.hypot(d[0],d[1],d[2]);
     if(L<1e-6) continue;
-    solids.push(Manifold.cylinder(L,rBeam,rBeam,seg,false).transform(_mFrame(d,A)));
+    solids.push(_placeCylinder(Manifold,L,rBeam,seg,d,A));
   }
-  for(const p of oriented){ solids.push(Manifold.sphere(rNode,16).translate(p)); }
+  for(const p of oriented){ solids.push(Manifold.sphere(rNode,8).translate(p)); }
   let list=solids;
   while(list.length>1){ const nx=[]; for(let i=0;i<list.length;i+=2){ if(i+1<list.length){ const u=Manifold.union(list[i],list[i+1]); list[i].delete(); list[i+1].delete(); nx.push(u);} else nx.push(list[i]); } list=nx; }
   const res=list[0]; const mesh=res.getMesh(); res.delete();
