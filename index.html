@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>geo-ball (UI v12.2.2)</title>
+<title>geo-ball (UI v12.3.0)</title>
 <style>
   :root{
     --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; --ring:#111827;
@@ -41,6 +41,11 @@
   .btn-outline{background:transparent;border-color:#111827;color:#111827}
   #viewwrap{height:560px}
   canvas{width:100%;height:100%;border:1px solid var(--line);border-radius:var(--radius);background:#fff;cursor:grab;display:block;touch-action:none}
+  .colorrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  input[type="color"]{width:46px;height:38px;padding:2px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;cursor:pointer}
+  .swatches{display:flex;gap:6px;flex-wrap:wrap}
+  .swatch{width:26px;height:26px;border-radius:50%;border:1px solid rgba(0,0,0,.18);padding:0;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .swatch:focus-visible{outline:2px solid #111827;outline-offset:2px}
   .statusbar{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}
   .status-left{display:flex;align-items:center;gap:10px}
   .status-dot{width:10px;height:10px;border-radius:50%;background:#10b981;border:1px solid #0ea5a3}
@@ -92,6 +97,21 @@
       <div class="field">
         <div class="label">形状分割レベル / Mesh Division Level (0–5)</div>
         <input id="detail10" type="number" value="2" step="1" min="0" max="5" inputmode="numeric">
+      </div>
+
+      <div class="field">
+        <div class="label">表示色 / Model Color <small style="color:#9ca3af">(プレビューのみ / preview only)</small></div>
+        <div class="colorrow">
+          <input id="modelcolor" type="color" value="#3a3a3a" aria-label="Model color / フィラメント色">
+          <div class="swatches" role="group" aria-label="Filament presets">
+            <button type="button" class="swatch" data-color="#3a3a3a" style="background:#3a3a3a" title="ダークグレー"></button>
+            <button type="button" class="swatch" data-color="#e23b3b" style="background:#e23b3b" title="レッド"></button>
+            <button type="button" class="swatch" data-color="#2f7de1" style="background:#2f7de1" title="ブルー"></button>
+            <button type="button" class="swatch" data-color="#36b37e" style="background:#36b37e" title="グリーン"></button>
+            <button type="button" class="swatch" data-color="#f5b301" style="background:#f5b301" title="イエロー"></button>
+            <button type="button" class="swatch" data-color="#f5f5f5" style="background:#f5f5f5" title="ホワイト"></button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -617,6 +637,21 @@ async function safeUpdate(refit){
 document.getElementById('regen').addEventListener('click', ()=>safeUpdate(false));
 document.querySelectorAll('input[name="pattern"]').forEach(el=>el.addEventListener('change', ()=>safeUpdate(false)));
 document.querySelectorAll('input[name="beamshape"]').forEach(el=>el.addEventListener('change', ()=>safeUpdate(false)));
+
+// ===== model color (preview-only: simulates color filament) =====
+// Color only affects how the preview looks; binary STL carries no color, so
+// this never touches the geometry or triggers a rebuild.
+const colorInput=document.getElementById('modelcolor');
+function applyColor(hex){ if(hasTHREE && material){ material.color.set(hex); } }
+if(colorInput){
+  applyColor(colorInput.value);
+  colorInput.addEventListener('input', ()=>applyColor(colorInput.value));
+}
+document.querySelectorAll('.swatch').forEach(b=>b.addEventListener('click', ()=>{
+  const c=b.getAttribute('data-color');
+  if(colorInput) colorInput.value=c;
+  applyColor(c);
+}));
 
 // init
 resize();
